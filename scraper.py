@@ -40,7 +40,7 @@ def extract_next_links(url, resp):
     #DEBUG ONLY - SET A MAX UNIQUE PAGE LIMIT FOR CRAWLING AND MAX ITER LIMIT
     global max_unique
     max_unique = 5000
-    if len(visited) > max_unique or iters > max_iters:
+    if len(visited) > max_unique:
         logging.info("REACHED MAX UNIQUE, stopping crawler")
         return []
     
