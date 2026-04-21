@@ -1,5 +1,6 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urldefrag, urljoin
+from bs4 import BeautifulSoup
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -15,7 +16,29 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+
+    #Defrag
+    clean_url, toss = urldefrag(url)
+
+    res = list()
+
+    if not (resp.status == 200 and resp.raw_response.content):
+        return []
+    
+
+    content_soup = BeautifulSoup(resp.raw_response.content, "lxml")
+
+    for a in content_soup.find_all('a', href = True):
+        href_url = a['href']
+
+        full_url = urljoin(url, href_url)
+        clean_full_url, toss = urldefrag(full_url)
+
+        if is_valid(clean_full_url):
+            res.append(clean_full_url)
+
+
+    return res
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
@@ -25,6 +48,15 @@ def is_valid(url):
         parsed = urlparse(url)
         if parsed.scheme not in set(["http", "https"]):
             return False
+        
+        if not (
+            parsed.netloc.endswith(".ics.uci.edu") or
+            parsed.netloc.endswith(".cs.uci.edu") or
+            parsed.netloc.endswith(".informatics.uci.edu") or
+            parsed.netloc.endswith(".stat.uci.edu")
+        ):
+            return False
+        
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
