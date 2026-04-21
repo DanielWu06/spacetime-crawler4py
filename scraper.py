@@ -1,6 +1,19 @@
 import re
 from urllib.parse import urlparse, urldefrag, urljoin
 from bs4 import BeautifulSoup
+import nltk
+from nltk.corpus import stopwords
+import logging
+
+
+visited = set()
+longest = ('',0)
+common = {}
+subdomains = {}
+max_unique = 0
+
+nltk.download("stopwords")
+stop_words = set(stopwords.words("english"))
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -17,6 +30,30 @@ def extract_next_links(url, resp):
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
+    global visited
+    global longest
+    global common
+    global subdomains
+    global stop_words
+
+
+    #DEBUG ONLY - SET A MAX UNIQUE PAGE LIMIT FOR CRAWLING AND MAX ITER LIMIT
+    global max_unique
+    max_unique = 5000
+    if len(visited) > max_unique or iters > max_iters:
+        logging.info("REACHED MAX UNIQUE, stopping crawler")
+        return []
+    
+    if len(visited) % 100 == 0:
+        logging.info("====UPDATE====")
+        logging.info(f"Visited: {len(visited)} unique visited")
+        logging.info(f"Subdomains: {len(subdomains)} subdomains seen")
+        for k, v in sorted(subdomains.items(), key=lambda x: len(x[1]), reverse=True)[:3]:
+            logging.info(f"Top domains: {k} -> {len(v)} pages")
+        logging.info(f"Words found: {len(common)}")
+        logging.info("===============")
+
+
     #Defrag
     clean_url, toss = urldefrag(url)
 
@@ -26,7 +63,34 @@ def extract_next_links(url, resp):
         return []
     
 
+    #UNIQUE
+    if clean_url not in visited:
+        visited.add(clean_url)
+    else:
+        return []
+
+    #SUBDOMAIN
+    host = urlparse(url).netloc
+    subdomains.setdefault(host, set()).add(clean_url)
+
+    #WORDS
     content_soup = BeautifulSoup(resp.raw_response.content, "lxml")
+    for tag in content_soup(["script", "style", "noscript"]):
+        tag.decompose()
+
+    text = content_soup.get_text(separator=" ")
+    text = re.sub(r"\s+", " ", text).strip()
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    words = [w for w in words if w not in stop_words]
+    for w in words:
+        common[w] = common.get(w,0) + 1
+
+    #LONGEST
+    len_page = len(words)
+    if len_page > longest[1]:
+        longest = (clean_url, len_page)
+
+    #SUBDOMAIN done in checks
 
     for a in content_soup.find_all('a', href = True):
         href_url = a['href']
@@ -44,16 +108,19 @@ def is_valid(url):
     # Decide whether to crawl this url or not. 
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
+
     try:
         parsed = urlparse(url)
+
         if parsed.scheme not in set(["http", "https"]):
             return False
         
+        host = parsed.netloc
         if not (
-            parsed.netloc.endswith(".ics.uci.edu") or
-            parsed.netloc.endswith(".cs.uci.edu") or
-            parsed.netloc.endswith(".informatics.uci.edu") or
-            parsed.netloc.endswith(".stat.uci.edu")
+            host.endswith(".ics.uci.edu") or
+            host.endswith(".cs.uci.edu") or
+            host.endswith(".informatics.uci.edu") or
+            host.endswith(".stat.uci.edu")
         ):
             return False
         
@@ -70,3 +137,15 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for ", parsed)
         raise
+
+def report():
+    logging.info("==========REPORT==========")
+    logging.info(f"Unique pages: {len(visited)}")
+
+    logging.info(f"Longest page: {longest[0]}, {longest[1]}")
+
+    for word, count in sorted(common.items(), key=lambda x: -x[1])[:50]:
+        logging.info(f"{word}, {count}")
+
+    for k in sorted(subdomains):
+        logging.info(f"{k}, {len(subdomains[k])}")
