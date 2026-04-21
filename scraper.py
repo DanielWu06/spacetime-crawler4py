@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse, urldefrag, urljoin
+from urllib.parse import urlparse, urldefrag, urljoin, parse_qsl
 from bs4 import BeautifulSoup
 import nltk
 from nltk.corpus import stopwords
@@ -11,6 +11,7 @@ longest = ('',0)
 common = {}
 subdomains = {}
 max_unique = 0
+fingerprints = []
 
 nltk.download("stopwords")
 stop_words = set(stopwords.words("english"))
@@ -35,6 +36,7 @@ def extract_next_links(url, resp):
     global common
     global subdomains
     global stop_words
+    global fingerprints
 
 
     #DEBUG ONLY - SET A MAX UNIQUE PAGE LIMIT FOR CRAWLING AND MAX ITER LIMIT
@@ -44,6 +46,7 @@ def extract_next_links(url, resp):
         logging.info("REACHED MAX UNIQUE, stopping crawler")
         return []
     
+    '''
     if len(visited) % 100 == 0:
         logging.info("====UPDATE====")
         logging.info(f"Visited: {len(visited)} unique visited")
@@ -52,6 +55,7 @@ def extract_next_links(url, resp):
             logging.info(f"Top domains: {k} -> {len(v)} pages")
         logging.info(f"Words found: {len(common)}")
         logging.info("===============")
+    '''
 
 
     #Defrag
@@ -61,19 +65,16 @@ def extract_next_links(url, resp):
 
     if not (resp.status == 200 and resp.raw_response.content):
         return []
-    
-
-    #UNIQUE
-    if clean_url not in visited:
-        visited.add(clean_url)
-    else:
+    #empty or large files
+    if len(resp.raw_response.content) == 0 or len(resp.raw_response.content) >= 5000000:
         return []
+    
+    #UNIQUE
+    if clean_url in visited:
+        return []
+    else:
+        visited.add(clean_url)
 
-    #SUBDOMAIN
-    host = urlparse(url).netloc
-    subdomains.setdefault(host, set()).add(clean_url)
-
-    #WORDS
     content_soup = BeautifulSoup(resp.raw_response.content, "lxml")
     for tag in content_soup(["script", "style", "noscript"]):
         tag.decompose()
@@ -82,15 +83,41 @@ def extract_next_links(url, resp):
     text = re.sub(r"\s+", " ", text).strip()
     words = re.findall(r"[a-zA-Z']+", text.lower())
     words = [w for w in words if w not in stop_words]
+    #low content
+    if not words or len(words) < 50:
+        return []
+
+    #Simhash check
+    
+    fingerprint = simhash(words)
+    if(fingerprint in fingerprints):
+        #exact copy
+        return []
+    
+    for other in fingerprints:
+        #check similarity
+
+        diff = bin(other^fingerprint).count("1")
+        similarity = 1 - (diff/64)
+        if similarity >= 0.8:
+            return []
+        
+    #Log new fingerprint
+    fingerprints.append(fingerprint)
+
+    #All checks passed, update info
+    #WORDS
     for w in words:
         common[w] = common.get(w,0) + 1
-
     #LONGEST
     len_page = len(words)
     if len_page > longest[1]:
         longest = (clean_url, len_page)
 
-    #SUBDOMAIN done in checks
+    #SUBDOMAIN
+    host = urlparse(clean_url).netloc
+    subdomains.setdefault(host, set()).add(clean_url)
+
 
     for a in content_soup.find_all('a', href = True):
         href_url = a['href']
@@ -102,7 +129,36 @@ def extract_next_links(url, resp):
             res.append(clean_full_url)
 
 
+
     return res
+
+def simhash(words) -> int:
+    #Returns our fingerprint for the simhash of the page
+    false_flags = {'home','login','logout','menu','search','copyright','credit','privacy','terms','faculty','department','news','services'}
+    new_words = [w for w in words if not w.isdigit() and len(w)>2 and w not in false_flags]
+
+    freq = {}
+    for w in new_words:
+        freq[w] = freq.get(w, 0) + 1
+
+    v = [0] * 64
+    for w, weight in freq.items():
+        word_hash = hash(w)
+
+        for i in range(64):
+            #rshift for all 64 bits
+            bit = (word_hash>>i) & 1
+
+            #add weight if component if hash is 1, subtract otherwise
+            v[i] += weight if bit == 1 else (-1 * weight)
+
+    fingerprint = 0
+    for i in range(64):
+        if v[i] > 0:
+            fingerprint |= (1<<i)
+
+    return fingerprint
+
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
@@ -122,6 +178,17 @@ def is_valid(url):
             host.endswith(".informatics.uci.edu") or
             host.endswith(".stat.uci.edu")
         ):
+            return False
+        
+        #Avoid query traps
+        params = parse_qsl(parsed.query)
+        query_traps = {'do','idx','diff','export','year','month','day','date','sid','sessionid'}
+        if len(params) > 4:
+            return False
+        if any(a in query_traps for a, b in params):
+            return False
+        numeric_count = sum(a.isdigit() for a, b in params)
+        if numeric_count >= 2:
             return False
         
         return not re.match(
