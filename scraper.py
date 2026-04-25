@@ -196,6 +196,10 @@ def is_valid(url):
         if numeric_count >= 2:
             return False
         
+        #ISO datetime matching
+        if re.search(r'\d{4}-\d{2}-\d{2}T\d{2}', parsed.query):
+            return False
+        
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
