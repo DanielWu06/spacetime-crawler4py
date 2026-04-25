@@ -122,11 +122,14 @@ def extract_next_links(url, resp):
     for a in content_soup.find_all('a', href = True):
         href_url = a['href']
 
-        full_url = urljoin(url, href_url)
-        clean_full_url, toss = urldefrag(full_url)
+        try:
+            full_url = urljoin(url, href_url)
+            clean_full_url, toss = urldefrag(full_url)
 
-        if is_valid(clean_full_url):
-            res.append(clean_full_url)
+            if is_valid(clean_full_url):
+                res.append(clean_full_url)
+        except Exception:
+            continue
 
 
 
@@ -182,10 +185,12 @@ def is_valid(url):
         
         #Avoid query traps
         params = parse_qsl(parsed.query)
-        query_traps = {'do','idx','diff','export','year','month','day','date','sid','sessionid'}
+        query_traps = {'do','idx','diff','export','year','month','day','date','sid','sessionid', 'history', 'version'}
+        #Too many params
         if len(params) > 4:
             return False
-        if any(a in query_traps for a, b in params):
+        #Found a likely trap OR Param too long
+        if any((a in query_traps) or (len(a)>40) for a, b in params):
             return False
         numeric_count = sum(a.isdigit() for a, b in params)
         if numeric_count >= 2:
