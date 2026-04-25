@@ -210,14 +210,14 @@ def is_valid(url):
         print ("TypeError for ", parsed)
         raise
 
-def report():
-    logging.info("==========REPORT==========")
-    logging.info(f"Unique pages: {len(visited)}")
+def report(logger):
+    logger.info("==========REPORT==========")
+    logger.info(f"Unique pages: {len(visited)}")
 
-    logging.info(f"Longest page: {longest[0]}, {longest[1]}")
+    logger.info(f"Longest page: {longest[0]}, {longest[1]}")
 
     for word, count in sorted(common.items(), key=lambda x: -x[1])[:50]:
-        logging.info(f"{word}, {count}")
+        logger.info(f"{word}, {count}")
 
     for k in sorted(subdomains):
-        logging.info(f"{k}, {len(subdomains[k])}")
+        logger.info(f"{k}, {len(subdomains[k])}")
