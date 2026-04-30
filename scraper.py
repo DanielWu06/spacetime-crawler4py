@@ -4,6 +4,9 @@ from bs4 import BeautifulSoup
 import nltk
 from nltk.corpus import stopwords
 import logging
+from threading import Lock
+
+mt_scraper_lock = Lock()
 
 
 visited = set()
@@ -40,11 +43,11 @@ def extract_next_links(url, resp):
 
 
     #DEBUG ONLY - SET A MAX UNIQUE PAGE LIMIT FOR CRAWLING AND MAX ITER LIMIT
-    global max_unique
-    max_unique = 5000
-    if len(visited) > max_unique:
-        logging.info("REACHED MAX UNIQUE, stopping crawler")
-        return []
+    # global max_unique
+    # max_unique = 500000
+    # if len(visited) > max_unique:
+    #     logging.info("REACHED MAX UNIQUE, stopping crawler")
+    #     return []
     
     '''
     if len(visited) % 100 == 0:
@@ -59,21 +62,23 @@ def extract_next_links(url, resp):
 
 
     #Defrag
+    # https://vision.ics.uci.edu/example#abcde -> https://vision.ics.uci.edu/example, abcde
     clean_url, toss = urldefrag(url)
 
     res = list()
 
     if not (resp.status == 200 and resp.raw_response.content):
         return []
-    #empty or large files
+    #empty or large files anything more than 5MB
     if len(resp.raw_response.content) == 0 or len(resp.raw_response.content) >= 5000000:
         return []
     
     #UNIQUE
-    if clean_url in visited:
-        return []
-    else:
-        visited.add(clean_url)
+    with mt_scraper_lock:
+        if clean_url in visited:
+            return []
+        else:
+            visited.add(clean_url)
 
     content_soup = BeautifulSoup(resp.raw_response.content, "lxml")
     for tag in content_soup(["script", "style", "noscript"]):
@@ -82,7 +87,7 @@ def extract_next_links(url, resp):
     text = content_soup.get_text(separator=" ")
     text = re.sub(r"\s+", " ", text).strip()
     words = re.findall(r"[a-zA-Z']+", text.lower())
-    words = [w for w in words if w not in stop_words]
+    words = [w for w in words if w not in stop_words and len(w) > 2] # dont add any words len < 2
     #low content
     if not words or len(words) < 50:
         return []
@@ -90,33 +95,35 @@ def extract_next_links(url, resp):
     #Simhash check
     
     fingerprint = simhash(words)
-    if(fingerprint in fingerprints):
-        #exact copy
-        return []
-    
-    for other in fingerprints:
-        #check similarity
-
-        diff = bin(other^fingerprint).count("1")
-        similarity = 1 - (diff/64)
-        if similarity >= 0.8:
+    with mt_scraper_lock:
+        if(fingerprint in fingerprints):
+            #exact copy
             return []
-        
-    #Log new fingerprint
-    fingerprints.append(fingerprint)
+
+        for other in fingerprints:
+            #check similarity
+
+            diff = bin(other^fingerprint).count("1")
+            similarity = 1 - (diff/64)
+            if similarity >= 0.8:
+                return []
+
+        #Log new fingerprint
+        fingerprints.append(fingerprint)
 
     #All checks passed, update info
     #WORDS
-    for w in words:
-        common[w] = common.get(w,0) + 1
-    #LONGEST
-    len_page = len(words)
-    if len_page > longest[1]:
-        longest = (clean_url, len_page)
+    with mt_scraper_lock:
+        for w in words:
+            common[w] = common.get(w,0) + 1
+        #LONGEST
+        len_page = len(words)
+        if len_page > longest[1]:
+            longest = (clean_url, len_page)
 
-    #SUBDOMAIN
-    host = urlparse(clean_url).netloc
-    subdomains.setdefault(host, set()).add(clean_url)
+        #SUBDOMAIN
+        host = urlparse(clean_url).netloc
+        subdomains.setdefault(host, set()).add(clean_url)
 
 
     for a in content_soup.find_all('a', href = True):
