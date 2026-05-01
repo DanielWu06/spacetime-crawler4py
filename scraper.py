@@ -230,5 +230,6 @@ def report(logger):
     for word, count in sorted(common.items(), key=lambda x: -x[1])[:50]:
         logger.info(f"{word}, {count}")
 
+    logger.info(f"Number of Subdomains: {len(subdomains)}")
     for k in sorted(subdomains):
         logger.info(f"{k}, {len(subdomains[k])}")

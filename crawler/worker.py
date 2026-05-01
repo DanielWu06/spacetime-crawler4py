@@ -8,7 +8,7 @@ import time
 
 from urllib.parse import urlparse
 domain_locks = {}
-last_domain_access ={}
+last_domain_access = {}
 registry_lock = Lock()
 
 def get_domain(url):
@@ -58,6 +58,7 @@ class Worker(Thread):
                 break
 
             domain = get_domain(tbd_url)
+            # self.logger.info(f"domain is: {domain}")
             #  instead of sleep at the end for multithreading
             politeness_enforcement(domain, self.config.time_delay)
 
